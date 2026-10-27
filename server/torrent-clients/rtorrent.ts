@@ -191,36 +191,54 @@ async function rtTorrentExists(config: ClientConfig, hash: string): Promise<bool
     }
 }
 
+async function rtIsMeta(config: ClientConfig, hash: string): Promise<boolean> {
+    try {
+        return Number(await rpcCall(config, 'd.is_meta', [hash])) === 1
+    } catch {
+        return false  // rTorrent trop ancien pour d.is_meta, ou torrent pas encore ajouté
+    }
+}
+
 /** Attend les métadonnées puis applique les priorités, avant le début du téléchargement. */
 async function rtApplyFilePriority(
     config   : ClientConfig,
     hash     : string,
     fileIndex: number,
 ): Promise<void> {
+    let lastError = ''
     for (let attempt = 0; attempt < 100; attempt++) {
         await new Promise(r => setTimeout(r, 300))
+        let files: any[]
         try {
-            const files: any[] = await rpcCall(config, 'f.multicall', [hash, '', 'f.size_bytes=', 'f.priority='])
-            const fileCount = Array.isArray(files) ? files.length : 0
-            if (fileCount === 0) continue
+            // Magnet sans métadonnées : rTorrent expose un faux fichier .meta, pas encore les épisodes
+            if (await rtIsMeta(config, hash)) continue
+            const res = await rpcCall(config, 'f.multicall', [hash, '', 'f.size_bytes=', 'f.priority='])
+            files = Array.isArray(res) ? res : []
+        } catch (err) {
+            // Torrent pas encore connu de rTorrent
+            lastError = err instanceof Error ? err.message : String(err)
+            continue
+        }
+        if (fileIndex >= files.length) continue
 
-            // Premier épisode choisi : tout désactiver sauf la cible ; sinon activer seulement la cible
-            const isInitialState = files.every((f: any) => Number(f[1]) > 0)
+        // Premier épisode choisi : tout désactiver sauf la cible ; sinon activer seulement la cible
+        const isInitialState = files.every((f: any) => Number(f[1]) > 0)
 
-            for (let i = 0; i < fileCount; i++) {
-                if (i === fileIndex) {
-                    await rpcCall(config, 'f.priority.set', [hash, i, 1])
-                } else if (isInitialState) {
-                    await rpcCall(config, 'f.priority.set', [hash, i, 0])
-                }
+        // Cible d'un fichier : « HASH:fN » ; d.update_priorities applique les changements
+        for (let i = 0; i < files.length; i++) {
+            if (i === fileIndex) {
+                await rpcCall(config, 'f.priority.set', [`${hash}:f${i}`, 1])
+            } else if (isInitialState) {
+                await rpcCall(config, 'f.priority.set', [`${hash}:f${i}`, 0])
             }
+        }
+        await rpcCall(config, 'd.update_priorities', [hash])
 
-            logger.info('rtorrent', `Fichier n° ${fileIndex} sélectionné pour ${hash.slice(0, 8)}…`)
-            return
-        } catch {}
+        logger.info('rtorrent', `Fichier n° ${fileIndex} sélectionné pour ${hash.slice(0, 8)}…`)
+        return
     }
 
-    throw new Error(`Délai dépassé : métadonnées du torrent ${hash.slice(0, 8)}… toujours indisponibles`)
+    throw new Error(`Délai dépassé : métadonnées du torrent ${hash.slice(0, 8)}… toujours indisponibles${lastError ? ` (${lastError})` : ''}`)
 }
 
 // ─── États ────────────────────────────────────────────────────
