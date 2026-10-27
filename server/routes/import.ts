@@ -372,7 +372,7 @@ router.delete('/organized/:serieId', requireAuth, async (req, res) => {
     if (deleteFile) {
         for (const hash of emptyHashes) {
             if (hash === 'manual') continue
-            dispatchRemove(hash, false).catch(err => logger.warn('api', `Impossible de retirer le torrent ${hash.slice(0, 8)}… du client : ${err instanceof Error ? err.message : err}`))
+            dispatchRemove(hash, true).catch(err => logger.warn('api', `Impossible de retirer le torrent ${hash.slice(0, 8)}… du client : ${err instanceof Error ? err.message : err}`))
         }
         if (serieFolder && fs.existsSync(serieFolder)) {
             try {
@@ -426,7 +426,7 @@ router.delete('/organized/:serieId/seasons/:seasonId', requireAuth, async (req, 
     if (deleteFile) {
         for (const hash of emptyHashes) {
             if (hash === 'manual') continue
-            dispatchRemove(hash, false).catch(err => logger.warn('api', `Impossible de retirer le torrent ${hash.slice(0, 8)}… du client : ${err instanceof Error ? err.message : err}`))
+            dispatchRemove(hash, true).catch(err => logger.warn('api', `Impossible de retirer le torrent ${hash.slice(0, 8)}… du client : ${err instanceof Error ? err.message : err}`))
         }
     }
     logger.info('api', `Retrait de la saison ${seasonId} (série ${serieId}) : ${removed} épisode(s) retiré(s)${deleteFile && emptyHashes.length ? `, ${emptyHashes.length} torrent(s) retiré(s) du client` : ''}`)
@@ -463,9 +463,10 @@ router.delete('/organized/:serieId/:episodeId', requireAuth, async (req, res) =>
         }
         writeOrganized(organized)
         if (deleteFile) {
+            // Plus aucun épisode importé ne dépend du torrent : retiré du client avec ses données
             for (const hash of emptyHashes) {
                 if (hash === 'manual') continue
-                dispatchRemove(hash, false).catch(err => logger.warn('api', `Impossible de retirer le torrent ${hash.slice(0, 8)}… du client : ${err instanceof Error ? err.message : err}`))
+                dispatchRemove(hash, true).catch(err => logger.warn('api', `Impossible de retirer le torrent ${hash.slice(0, 8)}… du client : ${err instanceof Error ? err.message : err}`))
             }
         }
         const removedTorrents = deleteFile ? emptyHashes.filter(h => h !== 'manual') : []
