@@ -376,10 +376,36 @@ const RT: TorrentClientDriver = {
             })
     },
 
+    // Progression par fichier : l'import manuel n'importe que les fichiers complets
+    // (rTorrent crée aussi sur le disque, partiellement, les fichiers voisins d'un épisode choisi)
+    async getFiles(config, hash) {
+        const res = await rpcCall(config, 'f.multicall', [hash.toUpperCase(), '', 'f.path=', 'f.completed_chunks=', 'f.size_chunks=', 'f.priority='])
+        return (Array.isArray(res) ? res : []).map((f: any, i: number) => ({
+            index   : i,
+            name    : String(f[0] ?? ''),
+            progress: Number(f[2]) > 0 ? Math.min(1, Number(f[1]) / Number(f[2])) : 0,
+            priority: Number(f[3] ?? 1),
+        }))
+    },
+
     async add(config, url, options?: DownloadOptions) {
         const hashMatch = url.match(/xt=urn:btih:([a-fA-F0-9]{40,})/i)
                        ?? options?.magnet?.match(/xt=urn:btih:([a-fA-F0-9]{40,})/i)
-        const hash      = hashMatch?.[1]?.toUpperCase() ?? null
+        const hash      = (options?.infohash ?? hashMatch?.[1])?.toUpperCase() ?? null
+
+        // Torrent entier demandé alors qu'il est déjà là avec une sélection partielle (un épisode,
+        // puis toute la saison) : rTorrent ignore un second load.start, il faut réactiver les fichiers
+        if (options?.file_index == null && hash && await rtTorrentExists(config, hash)) {
+            const res   = await rpcCall(config, 'f.multicall', [hash, '', 'f.priority='])
+            const files = Array.isArray(res) ? res : []
+            for (let i = 0; i < files.length; i++) {
+                if (Number(files[i][0]) === 0) await rpcCall(config, 'f.priority.set', [`${hash}:f${i}`, 1])
+            }
+            await rpcCall(config, 'd.update_priorities', [hash])
+            await rpcCall(config, 'd.start', [hash])
+            logger.info('rtorrent', `Torrent ${hash.slice(0, 8)}… déjà présent : tous ses fichiers sont maintenant téléchargés`)
+            return
+        }
 
         if (options?.file_index != null && hash) {
             const exists = await rtTorrentExists(config, hash)
