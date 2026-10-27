@@ -1,7 +1,9 @@
 /** rTorrent via XML-RPC (ruTorrent ou rTorrent seul, sur /RPC2 ou /XMLRPC). */
 
 import type { TorrentClientDriver, TorrentInfo, DownloadOptions, ClientConfig } from './index.js'
-import { clientFetch } from './index.js'
+import fs from 'fs'
+import path from 'path'
+import { clientFetch, remapSavePath } from './index.js'
 import { logger } from '../logger.js'
 
 // ─── XML-RPC ──────────────────────────────────────────────────
@@ -413,13 +415,52 @@ const RT: TorrentClientDriver = {
 
     async remove(config, hash, deleteFiles = false) {
         const h = hash.toUpperCase()
-        if (deleteFiles) {
-            await rpcCall(config, 'd.delete_tied', [h])
+        if (!deleteFiles) {
             await rpcCall(config, 'd.erase', [h])
-        } else {
-            await rpcCall(config, 'd.erase', [h])
+            logger.info('rtorrent', `Torrent ${hash.slice(0, 8)}… supprimé`)
+            return
         }
-        logger.info('rtorrent', `Torrent ${hash.slice(0, 8)}… supprimé${deleteFiles ? ' (avec fichiers)' : ''}`)
+
+        // rTorrent n'efface jamais les données (d.delete_tied ne retire que le .torrent ;
+        // ruTorrent passe par son plugin erasedata) : FanKarr supprime lui-même les fichiers
+        const directory = String(await rpcCall(config, 'd.directory', [h]) ?? '')
+        const isMulti   = Number(await rpcCall(config, 'd.is_multi_file', [h])) === 1
+        const res       = await rpcCall(config, 'f.multicall', [h, '', 'f.path='])
+        const relPaths  = (Array.isArray(res) ? res : []).map((f: any) => String(f[0] ?? '')).filter(Boolean)
+
+        await rpcCall(config, 'd.delete_tied', [h])
+        await rpcCall(config, 'd.erase', [h])
+
+        const local = (p: string) => remapSavePath(p, String(config.remotePath ?? ''), String(config.localPath ?? ''))
+        const root  = local(directory)
+        if (!path.isAbsolute(root) || path.dirname(root) === root) {
+            logger.warn('rtorrent', `Torrent ${hash.slice(0, 8)}… supprimé, fichiers conservés : dossier « ${directory} » inattendu`)
+            return
+        }
+
+        let deleted = 0
+        const dirs  = new Set<string>()
+        for (const rel of relPaths) {
+            const file = path.resolve(root, rel)
+            // Jamais en dehors du dossier du torrent
+            if (!file.startsWith(root + path.sep)) continue
+            try {
+                if (fs.existsSync(file)) { fs.unlinkSync(file); deleted++ }
+                dirs.add(path.dirname(file))
+            } catch (err) {
+                logger.warn('rtorrent', `Fichier non supprimé « ${file} » : ${err instanceof Error ? err.message : err}`)
+            }
+        }
+
+        // Dossiers vidés, du plus profond au dossier du torrent (seulement s'il lui est propre)
+        const stop = isMulti ? path.dirname(root) : root
+        for (const start of [...dirs].sort((a, b) => b.length - a.length)) {
+            for (let dir = start; dir !== stop && dir.startsWith(stop + path.sep); dir = path.dirname(dir)) {
+                try { fs.rmdirSync(dir) } catch { break }  // non vide ou déjà supprimé
+            }
+        }
+
+        logger.info('rtorrent', `Torrent ${hash.slice(0, 8)}… supprimé avec ${deleted} fichier(s) dans « ${root} »`)
     },
 }
 
