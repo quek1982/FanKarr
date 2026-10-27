@@ -1,0 +1,2 @@
+# Fichiers lus dans des conteneurs Linux : toujours en LF, même sur un clone Windows
+* text=auto eol=lf
