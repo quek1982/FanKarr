@@ -246,9 +246,11 @@ async function rtApplyFilePriority(
 // ─── États ────────────────────────────────────────────────────
 function mapState(isOpen: number, isActive: number, isChecking: number, isComplete: number): TorrentInfo['state'] {
     if (isChecking)           return 'checking'
+    // Terminé même arrêté : seedboxes et règles de ratio arrêtent souvent le torrent à la fin,
+    // et l'import ne prend que les torrents « seeding »
+    if (isComplete)           return 'seeding'
     if (!isOpen)              return 'paused'
     if (!isActive)            return 'paused'
-    if (isComplete)           return 'seeding'
     return 'downloading'
 }
 
