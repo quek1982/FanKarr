@@ -315,7 +315,7 @@ const RT: TorrentClientDriver = {
         await Promise.all(rows.map(async (r: any) => {
             const hash = String(r[0]).toUpperCase()
             try {
-                const files = await rpcCall(config, 'f.multicall', [hash, '', 'f.completed_length=', 'f.size_bytes=', 'f.path=', 'f.priority='])
+                const files = await rpcCall(config, 'f.multicall', [hash, '', 'f.completed_chunks=', 'f.size_chunks=', 'f.path=', 'f.priority=', 'f.size_bytes='])
                 if (Array.isArray(files) && files.length > 0) fileMap.set(hash.toLowerCase(), files)
             } catch {}
         }))
@@ -326,18 +326,31 @@ const RT: TorrentClientDriver = {
                     size, downloaded, uploadedTotal, ratioRaw,
                     dlSpeed, ulSpeed, leftBytes, directory, label] = r
 
-                const progress  = size > 0 ? Math.min(100, Math.round(((size - leftBytes) / size) * 100)) : 0
-                const eta       = Number(dlSpeed) > 0 && Number(leftBytes) > 0 ? Math.round(Number(leftBytes) / Number(dlSpeed)) : -1
                 const hashLower = String(hash).toLowerCase()
                 const fileInfo  = fileMap.get(hashLower) ?? []
+
+                // Sélection partielle : d.complete et d.left_bytes comptent aussi les fichiers
+                // désactivés, le torrent ne serait jamais terminé ni importé
+                const fileDone  = (f: any) => Number(f[1]) > 0 ? Math.min(1, Number(f[0]) / Number(f[1])) : 0
+                const wanted    = fileInfo.filter((f: any) => Number(f[3] ?? 1) > 0)
+                const partial   = wanted.length > 0 && wanted.length < fileInfo.length
+                const wantedSize = wanted.reduce((s: number, f: any) => s + Number(f[4] ?? 0), 0)
+                const wantedLeft = wanted.reduce((s: number, f: any) => s + Number(f[4] ?? 0) * (1 - fileDone(f)), 0)
+
+                const totalSize = partial ? wantedSize : Number(size)
+                const left      = partial ? wantedLeft : Number(leftBytes)
+                const complete  = partial ? wanted.every((f: any) => fileDone(f) >= 1) : Number(isComplete) === 1
+
+                const progress  = complete ? 100 : totalSize > 0 ? Math.min(100, Math.round(((totalSize - left) / totalSize) * 100)) : 0
+                const eta       = !complete && Number(dlSpeed) > 0 && left > 0 ? Math.round(left / Number(dlSpeed)) : -1
 
                 return {
                     hash      : hashLower,
                     name      : String(name),
-                    state     : mapState(Number(isOpen), Number(isActive), Number(isChecking), Number(isComplete)),
+                    state     : mapState(Number(isOpen), Number(isActive), Number(isChecking), complete ? 1 : 0),
                     progress,
-                    size      : Number(size),
-                    downloaded: Number(downloaded),
+                    size      : totalSize,
+                    downloaded: partial ? Math.round(wantedSize - wantedLeft) : Number(downloaded),
                     uploaded  : Number(uploadedTotal ?? 0),
                     ratio     : Math.round((Number(ratioRaw ?? 0) / 1000) * 100) / 100,
                     speed     : Number(dlSpeed),
