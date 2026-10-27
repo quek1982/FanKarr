@@ -6,12 +6,26 @@ import { logger } from '../logger.js'
 
 // ─── XML-RPC ──────────────────────────────────────────────────
 
+// Les magnets contiennent des « & » : sans échappement, le XML envoyé est invalide
+function xmlEscape(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function xmlUnescape(s: string): string {
+    return s.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|amp|quot|apos);/gi, (_, e: string) => {
+        const lower = e.toLowerCase()
+        if (lower.startsWith('#x')) return String.fromCodePoint(parseInt(e.slice(2), 16))
+        if (lower.startsWith('#'))  return String.fromCodePoint(parseInt(e.slice(1), 10))
+        return ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" } as Record<string, string>)[lower]
+    })
+}
+
 function xmlValue(val: any): string {
-    if (typeof val === 'string')  return `<value><string>${val}</string></value>`
+    if (typeof val === 'string')  return `<value><string>${xmlEscape(val)}</string></value>`
     if (typeof val === 'number')  return `<value><i8>${val}</i8></value>`
     if (typeof val === 'boolean') return `<value><boolean>${val ? 1 : 0}</boolean></value>`
     if (Array.isArray(val))       return `<value><array><data>${val.map(xmlValue).join('')}</data></array></value>`
-    return `<value><string>${String(val)}</string></value>`
+    return `<value><string>${xmlEscape(String(val))}</string></value>`
 }
 
 function xmlCall(method: string, params: any[] = []): string {
@@ -70,36 +84,92 @@ async function rpcCall(
 
     const text = await res.text()
 
-    // Pas de DOMParser sous Node : analyse XML minimale
-    const faultMatch = text.match(/<name>faultString<\/name>\s*<value><string>([^<]*)<\/string>/)
-    if (faultMatch) throw new Error(`Erreur rTorrent : ${faultMatch[1]}`)
-
-    const valueMatch = text.match(/<methodResponse>\s*<params>\s*<param>\s*<value>([\s\S]*?)<\/value>\s*<\/param>/)
-    if (!valueMatch) return null
-
-    // Types courants uniquement
-    const inner = valueMatch[1].trim()
-
-    if (inner.startsWith('<array>')) {
-        const items = [...inner.matchAll(/<value>([\s\S]*?)<\/value>/g)]
-        return items.map(m => parseInnerValue(m[1].trim()))
+    // Pas de DOMParser sous Node : analyse XML-RPC maison
+    const fault = text.match(/<fault>([\s\S]*)<\/fault>/)
+    if (fault) {
+        const f = parseXmlRpc(fault[1])
+        throw new Error(`Erreur rTorrent : ${f?.faultString ?? 'réponse en erreur'}`)
     }
 
-    return parseInnerValue(inner)
+    const param = text.match(/<param>([\s\S]*)<\/param>/)
+    if (!param) return null
+    return parseXmlRpc(param[1])
 }
 
-function parseInnerValue(inner: string): any {
-    if (inner.startsWith('<array>')) {
-        const items = [...inner.matchAll(/<value>([\s\S]*?)<\/value>/g)]
-        return items.map(m => parseInnerValue(m[1].trim()))
+/**
+ * Analyse récursive d'un <value> XML-RPC. Les réponses de d.multicall2 et f.multicall
+ * sont des tableaux de tableaux : une analyse par regex non imbriquée les aplatit.
+ */
+function parseXmlRpc(xml: string): any {
+    type Tok = { text?: string; tag?: string; close?: boolean; self?: boolean }
+    const tokens: Tok[] = [...xml.matchAll(/<(\/?)([\w.]+)[^>]*?(\/?)>|([^<]+)/g)].map(m =>
+        m[4] !== undefined
+            ? { text: m[4] }
+            : { tag: m[2], close: m[1] === '/', self: m[3] === '/' }
+    )
+    let i = 0
+
+    const skipBlank = () => { while (i < tokens.length && 'text' in tokens[i] && !tokens[i].text!.trim()) i++ }
+    const expect = (tag: string, close: boolean) => {
+        skipBlank()
+        const t = tokens[i]
+        if (!t || t.tag !== tag || t.close !== close) throw new Error(`Réponse XML-RPC inattendue (attendu <${close ? '/' : ''}${tag}>)`)
+        i++
+        return t
     }
-    const strMatch = inner.match(/^<string>([\s\S]*?)<\/string>$/)
-    if (strMatch) return strMatch[1]
-    const intMatch = inner.match(/^<(?:i4|i8|int)>([\s\S]*?)<\/(?:i4|i8|int)>$/)
-    if (intMatch) return parseInt(intMatch[1], 10)
-    // Valeur brute sans tag
-    if (!inner.includes('<')) return inner
-    return inner
+    const readText = (tag: string) => {
+        let s = ''
+        while (i < tokens.length && !(tokens[i].tag === tag && tokens[i].close)) s += tokens[i++].text ?? ''
+        i++
+        return xmlUnescape(s)
+    }
+
+    const value = (): any => {
+        if (expect('value', false).self) return ''
+        // Valeur sans type : chaîne
+        if (tokens[i] && (('text' in tokens[i] && tokens[i + 1]?.tag === 'value') || tokens[i].tag === 'value')) {
+            return readText('value')
+        }
+        skipBlank()
+        const t = tokens[i++]
+        let v: any
+        if (t.self) {
+            v = t.tag === 'array' ? [] : t.tag === 'struct' ? {} : ''
+        } else if (t.tag === 'array') {
+            v = []
+            if (!expect('data', false).self) {
+                skipBlank()
+                while (tokens[i]?.tag === 'value' && !tokens[i].close) { v.push(value()); skipBlank() }
+                expect('data', true)
+            }
+            expect('array', true)
+        } else if (t.tag === 'struct') {
+            v = {}
+            skipBlank()
+            while (tokens[i]?.tag === 'member' && !tokens[i].close) {
+                i++
+                expect('name', false)
+                const name = readText('name')
+                v[name] = value()
+                expect('member', true)
+                skipBlank()
+            }
+            expect('struct', true)
+        } else {
+            const raw = readText(t.tag!)
+            switch (t.tag) {
+                case 'int': case 'i4': case 'i8': v = parseInt(raw, 10); break
+                case 'double' : v = parseFloat(raw); break
+                case 'boolean': v = raw.trim() === '1'; break
+                default       : v = raw
+            }
+        }
+        expect('value', true)
+        return v
+    }
+
+    skipBlank()
+    return value()
 }
 
 async function d_multicall(
