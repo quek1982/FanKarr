@@ -1,0 +1,15 @@
+## Config du banc de test : celle de l'image, sans le déplacement des torrents terminés
+## (les terminés restent là où ils ont été téléchargés, comme sur une seedbox ultra.cc)
+throttle.min_peers.normal.set = 1
+throttle.max_peers.normal.set = 100
+throttle.min_peers.seed.set = 1
+throttle.max_peers.seed.set = 50
+throttle.max_uploads.set = 15
+throttle.global_down.max_rate.set_kb = 0
+throttle.global_up.max_rate.set_kb = 0
+dht.mode.set = disable
+protocol.pex.set = no
+pieces.hash.on_completion.set = yes
+protocol.encryption.set = allow_incoming,try_outgoing,enable_retry
+system.umask.set = 0022
+directory.watch.added = (cat,(cfg.watch)), load.start

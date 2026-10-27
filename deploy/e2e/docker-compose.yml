@@ -1,0 +1,84 @@
+# Banc de test de bout en bout : FanKarr + vrai rTorrent + faux catalogue
+#   node deploy/e2e/gen/gen.mjs deploy/e2e/work   (une fois)
+#   node scripts/package-linux.mjs                (le banc teste l'archive de release/)
+#   docker compose -f deploy/e2e/docker-compose.yml up -d --build
+#   node deploy/e2e/seed.mjs                       (après chaque recréation des conteneurs)
+#   node deploy/e2e/test.mjs
+#   FanKarr : http://localhost:8097/fankarr   ruTorrent : http://localhost:8098
+name: fankarr-e2e
+
+services:
+  catalog:
+    image: nginx:stable
+    volumes:
+      - ./work/catalog:/usr/share/nginx/html:ro
+
+  # Remplace metadata.fankai.fr dans le réseau du banc (certificat de test)
+  fakeapi:
+    image: node:22-slim
+    command: node /app/server.mjs
+    volumes:
+      - ./fakeapi:/app:ro
+      - ./work:/work:ro
+      - ./work/cert:/cert:ro
+    networks:
+      default:
+        aliases:
+          - metadata.fankai.fr
+
+  tracker:
+    image: node:22-slim
+    command: node /tracker/tracker.mjs
+    volumes:
+      - ./tracker:/tracker:ro
+
+  seeder:
+    build: ./rtorrent
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      - ./work/seed:/seed
+      - seeder-data:/data
+    ports:
+      - "127.0.0.1:8099:8000"
+
+  rtorrent:
+    build: ./rtorrent
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      - downloads:/downloads
+      - rtorrent-data:/data
+    ports:
+      - "127.0.0.1:8098:8080"   # ruTorrent, pour regarder
+      - "127.0.0.1:8100:8000"   # XML-RPC, pour les vérifications du test
+
+  fankarr:
+    build: ../ultracc-test
+    volumes:
+      - ../../release/fankarr-linux-x64:/pkg:ro
+      - downloads:/downloads   # même chemin que rTorrent, comme sur la seedbox
+      - fankarr-config:/config
+    environment:
+      TEST_BASE_PATH: /fankarr
+      TEST_PORT: "9898"
+      GITHUB_BASE: http://catalog
+      # Accepte le certificat de la fausse API Fankai (banc de test uniquement)
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+
+  proxy:
+    image: nginx:stable
+    ports:
+      - "127.0.0.1:8097:80"
+    volumes:
+      - ../ultracc-test/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - fankarr
+
+volumes:
+  downloads:
+  rtorrent-data:
+  seeder-data:
+  fankarr-config:
