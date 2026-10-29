@@ -27,61 +27,86 @@
         <!-- ── Colonne principale ── -->
         <div data-tour="dashboard-main" class="flex flex-col gap-[30px] min-w-0 max-lg:contents">
 
-          <section v-if="hero" class="relative sm:min-h-[344px] rounded-card overflow-hidden bg-card max-lg:order-1">
-            <img v-if="hero.serie.poster_image" :src="hero.serie.poster_image" alt="" class="absolute inset-0 w-full h-full object-cover blur-[34px] saturate-[1.3] scale-[1.35] opacity-60" />
+          <section
+              v-if="slide"
+              class="relative sm:min-h-[344px] rounded-card overflow-hidden bg-card max-lg:order-1"
+              aria-roledescription="carrousel"
+              aria-label="Séries de la médiathèque"
+              @pointerenter="hovering = $event.pointerType === 'mouse'"
+              @pointerleave="hovering = false"
+              @touchstart.passive="onTouchStart"
+              @touchend="onTouchEnd"
+          >
+            <img v-if="slide.serie.poster_image" :src="slide.serie.poster_image" alt="" class="absolute inset-0 w-full h-full object-cover blur-[34px] saturate-[1.3] scale-[1.35] opacity-60" />
             <div class="absolute inset-0 bg-linear-to-r from-main/97 via-main/84 via-48% to-main/35" />
             <div class="dot-grid" />
             <div class="relative sm:hidden flex flex-col gap-5 p-4">
               <div class="flex gap-4">
-                <RouterLink :to="`/series/${hero.serie.id}`" class="relative shrink-0">
-                  <img v-if="hero.serie.poster_image" :src="hero.serie.poster_image" :alt="hero.serie.title" class="w-[88px] h-[132px] object-cover rounded-poster shadow-[0_16px_32px_rgb(0_0_0/0.5),0_0_0_1px_rgb(239_233_221/0.08)]" />
+                <RouterLink :to="`/series/${slide.serie.id}`" class="relative shrink-0">
+                  <img v-if="slide.serie.poster_image" :src="slide.serie.poster_image" :alt="slide.serie.title" class="w-[88px] h-[132px] object-cover rounded-poster shadow-[0_16px_32px_rgb(0_0_0/0.5),0_0_0_1px_rgb(239_233_221/0.08)]" />
                   <span v-else class="w-[88px] h-[132px] rounded-poster bg-hover flex items-center justify-center text-muted"><Tv :size="22" /></span>
-                  <span v-if="isNew(hero.at)" class="stamp-new absolute -left-2 top-3">NOUVEAU</span>
+                  <span v-if="isNew(slide.at)" class="stamp-new absolute -left-2 top-3">NOUVEAU</span>
                 </RouterLink>
                 <div class="flex-1 min-w-0 flex flex-col gap-1.5 pt-1">
-                  <span class="text-[10.5px] tracking-[0.16em] font-bold uppercase text-accent">{{ auth.isAdmin ? 'Importée' : 'Ajoutée' }} {{ formatRelative(hero.at) }}</span>
-                  <RouterLink :to="`/series/${hero.serie.id}`" class="flex flex-col">
+                  <span class="text-[10.5px] tracking-[0.16em] font-bold uppercase text-accent">{{ slide.latest ? `${auth.isAdmin ? 'Importée' : 'Ajoutée'} ${formatRelative(slide.at)}` : 'Dans la médiathèque' }}</span>
+                  <RouterLink :to="`/series/${slide.serie.id}`" class="flex flex-col">
                     <span class="font-display text-[28px] leading-[1.05] font-extrabold text-primary line-clamp-2">{{ heroTitle.name }}</span>
                     <span v-if="heroTitle.suffix" class="font-display text-xl leading-snug font-semibold text-accent">{{ heroTitle.suffix }}</span>
                   </RouterLink>
                   <p class="text-meta text-secondary">
-                    <template v-for="part in heroMeta" :key="part">{{ part }} · </template>{{ auth.isAdmin ? plural(hero.episodes, 'épisode ajouté', 'épisodes ajoutés') : `${plural(hero.episodes, 'épisode')} à regarder` }}.
+                    <template v-for="part in heroMeta" :key="part">{{ part }} · </template>{{ heroEpisodes.count }} {{ heroEpisodes.tail }}
                   </p>
                 </div>
               </div>
-              <RouterLink :to="`/series/${hero.serie.id}`" class="btn-primary w-full">
-                Voir la série <ArrowRight :size="16" />
-              </RouterLink>
+              <div class="flex items-center gap-2">
+                <RouterLink :to="`/series/${slide.serie.id}`" class="btn-primary flex-1">
+                  Voir la série <ArrowRight :size="16" />
+                </RouterLink>
+                <template v-if="slides.length > 1">
+                  <button @click="go(-1)" class="btn-icon bg-main/60" aria-label="Série précédente"><ChevronLeft :size="16" /></button>
+                  <button @click="go(1)" class="btn-icon bg-main/60" aria-label="Série suivante"><ChevronRight :size="16" /></button>
+                </template>
+              </div>
             </div>
             <div class="relative min-h-[344px] hidden sm:flex items-center gap-9 pl-10 pr-11 py-8">
               <div class="flex-1 min-w-0 flex flex-col gap-4">
                 <div class="flex items-center gap-3">
-                  <span class="text-[11.5px] tracking-[0.18em] font-bold uppercase text-accent">{{ auth.isAdmin ? 'Dernier import' : 'Nouveau dans la médiathèque' }}</span>
-                  <span class="w-[26px] h-px bg-accent/50" />
-                  <span class="text-[13px] text-secondary">{{ formatRelative(hero.at) }}</span>
+                  <span class="text-[11.5px] tracking-[0.18em] font-bold uppercase text-accent">{{ slide.latest ? (auth.isAdmin ? 'Dernier import' : 'Nouveau dans la médiathèque') : 'Dans la médiathèque' }}</span>
+                  <template v-if="slide.at">
+                    <span class="w-[26px] h-px bg-accent/50" />
+                    <span class="text-[13px] text-secondary">{{ slide.latest ? formatRelative(slide.at) : `${auth.isAdmin ? 'importée' : 'ajoutée'} ${formatRelative(slide.at)}` }}</span>
+                  </template>
                 </div>
-                <RouterLink :to="`/series/${hero.serie.id}`" class="flex flex-col gap-0.5 w-fit">
+                <RouterLink :to="`/series/${slide.serie.id}`" class="flex flex-col gap-0.5 w-fit">
                   <span class="font-display text-[40px] sm:text-[56px] leading-[1.02] font-extrabold text-primary line-clamp-2">{{ heroTitle.name }}</span>
                   <span v-if="heroTitle.suffix" class="font-display text-2xl sm:text-[30px] leading-[1.15] font-semibold text-accent">{{ heroTitle.suffix }}</span>
                 </RouterLink>
                 <p class="text-[15px] leading-[1.6] text-secondary max-w-[420px] text-pretty">
                   <template v-for="part in heroMeta" :key="part">{{ part }} · </template>
-                  <span class="text-primary">{{ auth.isAdmin ? plural(hero.episodes, 'épisode ajouté', 'épisodes ajoutés') : plural(hero.episodes, 'épisode') }}</span>
-                  {{ auth.isAdmin ? 'à la médiathèque.' : 'à regarder.' }}
+                  <span class="text-primary">{{ heroEpisodes.count }}</span>
+                  {{ heroEpisodes.tail }}
                 </p>
                 <div class="flex items-center gap-5 mt-1.5 flex-wrap">
-                  <RouterLink :to="`/series/${hero.serie.id}`" class="btn-primary h-[42px] text-sm pl-[22px]">
+                  <RouterLink :to="`/series/${slide.serie.id}`" class="btn-primary h-[42px] text-sm pl-[22px]">
                     Voir la série <ArrowRight :size="16" />
                   </RouterLink>
                   <RouterLink :to="auth.isAdmin ? '/activity' : '/series'" class="text-body text-secondary hover:text-primary transition-colors">
                     {{ auth.isAdmin ? 'Tous les imports récents' : 'Parcourir la médiathèque' }}
                   </RouterLink>
+                  <div v-if="slides.length > 1" class="ml-auto flex items-center gap-2.5">
+                    <button @click="go(-1)" class="btn-icon bg-main/60" aria-label="Série précédente"><ChevronLeft :size="16" /></button>
+                    <span class="min-w-12 text-center text-[13px] text-secondary tabular-nums">{{ slideIndex + 1 }} / {{ slides.length }}</span>
+                    <button @click="go(1)" class="btn-icon bg-main/60" aria-label="Série suivante"><ChevronRight :size="16" /></button>
+                  </div>
                 </div>
               </div>
-              <RouterLink :to="`/series/${hero.serie.id}`" class="relative shrink-0 rotate-2">
-                <img v-if="hero.serie.poster_image" :src="hero.serie.poster_image" :alt="hero.serie.title" class="w-[180px] h-[270px] object-cover rounded-poster shadow-[0_28px_60px_rgb(0_0_0/0.55),0_0_0_1px_rgb(239_233_221/0.08)]" />
-                <span v-if="isNew(hero.at)" class="stamp-new absolute -left-7 top-4 text-[15px] px-[11px] pt-1 pb-[3px] tracking-[0.14em] -rotate-[9deg]">NOUVEAU</span>
+              <RouterLink :to="`/series/${slide.serie.id}`" class="relative shrink-0 rotate-2">
+                <img v-if="slide.serie.poster_image" :src="slide.serie.poster_image" :alt="slide.serie.title" class="w-[180px] h-[270px] object-cover rounded-poster shadow-[0_28px_60px_rgb(0_0_0/0.55),0_0_0_1px_rgb(239_233_221/0.08)]" />
+                <span v-if="isNew(slide.at)" class="stamp-new absolute -left-7 top-4 text-[15px] px-[11px] pt-1 pb-[3px] tracking-[0.14em] -rotate-[9deg]">NOUVEAU</span>
               </RouterLink>
+            </div>
+            <div v-if="slides.length > 1" class="absolute inset-x-0 bottom-0 h-[3px] bg-hover/80">
+              <div class="h-full bg-accent transition-[width] duration-500" :style="{ width: `${(slideIndex + 1) / slides.length * 100}%` }" />
             </div>
           </section>
 
@@ -333,8 +358,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useDebounceFn } from '@vueuse/core'
-import { ArrowRight, Check, ChevronRight, Folder, RefreshCw, Search, TriangleAlert, Tv, X } from 'lucide-vue-next'
+import { useDebounceFn, useDocumentVisibility, useIntervalFn, usePreferredReducedMotion } from '@vueuse/core'
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Folder, RefreshCw, Search, TriangleAlert, Tv, X } from 'lucide-vue-next'
 import { useAuthStore }     from '@/stores/auth'
 import { useSeriesStore, type Serie } from '@/stores/series'
 import { useRequestsStore } from '@/stores/requests'
@@ -385,8 +410,62 @@ const recentWithSerie = computed(() => recent.value
 
 const hero       = computed(() => recentWithSerie.value[0] ?? null)
 const recentList = computed(() => recentWithSerie.value.slice(1, 7))
-const heroTitle  = computed(() => splitTitle(hero.value?.serie.title ?? ''))
-const heroMeta   = computed(() => [hero.value?.serie.year, statusLabel(hero.value?.serie.status)].filter(Boolean).map(String))
+
+// ── Bandeau : le dernier import, puis le reste de la médiathèque du plus récent au plus ancien ──
+const slides = computed(() => {
+  const first  = hero.value
+  const others = seriesStore.series
+    .filter(s => s.has_files && s.id !== first?.serie.id)
+    .sort((a, b) => (b.last_imported_at ?? '').localeCompare(a.last_imported_at ?? ''))
+    .map(s => ({ serie: s, at: s.last_imported_at, episodes: 0, latest: false }))
+  return first ? [{ serie: first.serie, at: first.at, episodes: first.episodes, latest: true }, ...others] : others
+})
+const slideIndex = ref(0)
+const slide      = computed(() => slides.value[slideIndex.value % Math.max(1, slides.value.length)] ?? null)
+const heroTitle  = computed(() => splitTitle(slide.value?.serie.title ?? ''))
+const heroMeta   = computed(() => [slide.value?.serie.year, statusLabel(slide.value?.serie.status)].filter(Boolean).map(String))
+
+const heroEpisodes = computed(() => {
+  const s = slide.value
+  if (!s) return { count: '', tail: '' }
+  if (s.latest) return auth.isAdmin
+    ? { count: plural(s.episodes, 'épisode ajouté', 'épisodes ajoutés'), tail: 'à la médiathèque.' }
+    : { count: plural(s.episodes, 'épisode'), tail: 'à regarder.' }
+  const { organized_count: done, episode_count: total } = s.serie
+  return done < total
+    ? { count: `${done} / ${plural(total, 'épisode')}`, tail: done > 1 ? 'disponibles.' : 'disponible.' }
+    : { count: plural(total, 'épisode'), tail: 'à regarder.' }
+})
+
+// Défilement automatique, arrêté au survol, onglet caché ou animations réduites
+const hovering      = ref(false)
+const visibility    = useDocumentVisibility()
+const reducedMotion = usePreferredReducedMotion()
+
+function step(delta: number) {
+  const n = slides.value.length
+  if (n > 1) slideIndex.value = ((slideIndex.value % n) + delta + n) % n
+}
+
+const autoplay = useIntervalFn(() => {
+  if (!hovering.value && visibility.value === 'visible' && reducedMotion.value !== 'reduce') step(1)
+}, 6000)
+
+// Un changement à la main relance le délai pour laisser le temps de lire
+function go(delta: number) {
+  step(delta)
+  autoplay.pause()
+  autoplay.resume()
+}
+
+let touchX: number | null = null
+function onTouchStart(e: TouchEvent) { touchX = e.touches[0]?.clientX ?? null }
+function onTouchEnd(e: TouchEvent) {
+  if (touchX === null) return
+  const dx = (e.changedTouches[0]?.clientX ?? touchX) - touchX
+  touchX = null
+  if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1)
+}
 
 // ── Chiffres ──
 const stats = computed(() => ({
