@@ -1,5 +1,6 @@
 // Scénario de bout en bout FanKarr + rTorrent. Repart d'un état vierge.
-//   node deploy/e2e/test.mjs
+//   node deploy/e2e/test.mjs            (~6 min, obligatoire avant une Release)
+//   node deploy/e2e/test.mjs --rapide   (sans A2, B et I2 : la reprise d'un torrent partiellement terminé)
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { DIR, FANKARR, RTORRENT, SEEDER, TORRENTS, api, rpc, rtList, rtFiles, sh, sleep, waitFor } from './lib.mjs'
@@ -18,10 +19,15 @@ function check(label, ok, detail = '') {
     console.log(`${ok ? '  ✔' : '  ✘'} ${label}${!ok && detail ? `\n      → ${detail}` : ''}`)
     return !!ok
 }
-async function step(name, fn) {
+const RAPIDE    = process.argv.includes('--rapide')
+const durations = []
+async function step(name, fn, { lent = false } = {}) {
+    if (lent && RAPIDE) { console.log(`\n■ ${name}\n  (sautée : --rapide)`); return }
     section = name
     console.log(`\n■ ${name}`)
+    const t0 = Date.now()
     try { await fn() } catch (err) { check('étape terminée sans erreur', false, err.message) }
+    durations.push({ name, s: Math.round((Date.now() - t0) / 1000) })
 }
 
 // ── Outils ────────────────────────────────────────────────────
@@ -126,7 +132,7 @@ await step('A2. Un deuxième épisode du même pack ensuite (S01E03)', async () 
     await waitDone(T1.infohash, 'S01E02 + S01E03')
     await importNow(T1.infohash)
     check('S01E03 importé, S01E01 toujours absent', exists(media(1, 3)) && !exists(media(1, 1)))
-})
+}, { lent: true })
 
 await step('B. Toute la saison ensuite (même torrent déjà présent)', async () => {
     const s = await serie()
@@ -141,7 +147,7 @@ await step('B. Toute la saison ensuite (même torrent déjà présent)', async (
     await waitDone(T1.infohash, 'saison 1')
     const r = await importNow(T1.infohash)
     check('import : S01E01 et S01E03 importés', exists(media(1, 1)) && exists(media(1, 3)), JSON.stringify(r))
-})
+}, { lent: true })
 
 await step('C. Torrent d\'un seul fichier (S02E02)', async () => {
     const t = await epTorrent(900202)
@@ -167,7 +173,8 @@ await step('E. Supprimer des épisodes (fichier + torrent devenu inutile)', asyn
     check('suppression S01E02 acceptée', r.status === 200, JSON.stringify(r.data))
     check('S01E02 retiré de la médiathèque', !exists(media(1, 2)))
     // S01E02 vient aussi de l'intégrale : vérifier qu'aucun torrent encore utile n'a été retiré
-    check('pack de saison conservé (S01E01, S01E03 en dépendent)', !!(await inRt(T1.infohash)))
+    // S01E01 et S01E03 ne viennent du pack qu'après B (sautée en --rapide)
+    if (!RAPIDE) check('pack de saison conservé (S01E01, S01E03 en dépendent)', !!(await inRt(T1.infohash)))
     await api('DELETE', '/api/organized/9001/900101?deleteFile=true')
     await api('DELETE', '/api/organized/9001/900103?deleteFile=true')
     await sleep(3000)
@@ -234,7 +241,7 @@ await step('I2. Épisode suivant du même pack, torrent arrêté une fois termin
     await setup({ autoImport: true })
     const ok = await waitFor('import automatique', () => exists(media(1, 3)), 60_000, 2000).catch(() => false)
     check('S01E03 importé automatiquement', ok, (await fkLogs(/organize/)).slice(-5).join(' | '))
-})
+}, { lent: true })
 
 await step('J. Mode « déplacer »', async () => {
     await api('POST', '/api/settings', { organizeMode: 'move', autoImport: false })
@@ -332,6 +339,9 @@ await step('Journal FanKarr', async () => {
 
 // ── Bilan ─────────────────────────────────────────────────────
 const failed = results.filter(r => !r.ok)
-console.log(`\n${results.length - failed.length}/${results.length} vérifications réussies`)
+console.log(`\n${results.length - failed.length}/${results.length} vérifications réussies${RAPIDE ? ' (--rapide : A2, B et I2 sautées)' : ''}`)
 for (const f of failed) console.log(`  ✘ [${f.section}] ${f.label}`)
+console.log('\nDurée par étape :')
+for (const d of durations) console.log(`  ${String(d.s).padStart(4)} s  ${d.name}`)
+console.log(`  ${String(Math.round(process.uptime())).padStart(4)} s  total (remise à zéro comprise)`)
 process.exitCode = failed.length ? 1 : 0

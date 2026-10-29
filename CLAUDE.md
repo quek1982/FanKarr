@@ -27,8 +27,11 @@ node deploy/e2e/gen/gen.mjs deploy/e2e/work      # une fois : données de test (
 MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -keyout deploy/e2e/work/cert/key.pem -out deploy/e2e/work/cert/cert.pem -days 365 -subj "/CN=metadata.fankai.fr" -addext "subjectAltName=DNS:metadata.fankai.fr"
 docker compose -f deploy/e2e/docker-compose.yml up -d --build
 node deploy/e2e/seed.mjs                         # après chaque recréation des conteneurs, sinon rien ne se télécharge
-node deploy/e2e/test.mjs                         # ~10 min, 71/71 attendu
+node deploy/e2e/test.mjs                         # ~6 min, 71/71 attendu : obligatoire avant une Release
+node deploy/e2e/test.mjs --rapide                # ~1 min, 62/62 : saute A2, B et I2 (reprise d'un torrent partiellement terminé)
 ```
+
+`--rapide` suffit pendant le travail sur ce qui ne touche pas aux torrents (sécurité, interface, API). Les trois quarts du banc complet sont l'attente de rTorrent avant de reprendre un torrent déjà en partie terminé (~90 s à chaque fois) ; ni une réannonce du seeder ni son redémarrage (`d.stop`/`d.start`) ne l'accélèrent, le redémarrage bloque même la reprise.
 
 Le banc (ports 8097-8100) lance un vrai rTorrent, un seeder, un tracker, un faux catalogue et une fausse API metadata.fankai.fr, avec FanKarr derrière nginx sous `/fankarr`. Après une reconstruction de l'archive : `docker compose … restart fankarr proxy`.
 
@@ -40,7 +43,7 @@ Le banc (ports 8097-8100) lance un vrai rTorrent, un seeder, un tracker, un faux
 
 ## Pièges connus
 
-- rTorrent met environ 90 s à reprendre un torrent partiellement terminé après la réactivation d'un fichier : c'est son fonctionnement, pas un bug.
+- rTorrent met environ 90 s à reprendre un torrent partiellement terminé après la réactivation d'un fichier : c'est son fonctionnement, pas un bug (voir `--rapide` ci-dessus).
 - Sur ultra.cc, rTorrent peut arrêter un torrent une fois terminé : un torrent complet doit être vu comme terminé même s'il est arrêté.
 - Le DNS d'ultra.cc ne résout pas les noms `*.plex.direct`.
 - Sous Windows, le `tar` de Git prend `C:` pour un hôte distant : lancer `tar` depuis le dossier de l'archive, avec des chemins relatifs.
