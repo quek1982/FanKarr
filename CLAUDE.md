@@ -2,26 +2,18 @@
 
 Fork de [Masutayunikon/FanKarr](https://github.com/Masutayunikon/FanKarr) pour faire tourner FanKarr en **binaire Linux x64 autonome (sans Docker)**, servi sous **`/fankarr`** derrière le nginx d'une seedbox **ultra.cc**, avec **rTorrent** comme client.
 
-Objectif permanent : **garder l'écart avec l'amont minimal** pour continuer à récupérer ses mises à jour. Pas de refactor ni de reformatage hors sujet ; le code ajouté suit le style du code voisin.
+L'amont ne répond plus : le fork vit sa vie. Le code ajouté suit le style du code voisin, sans refactor ni reformatage hors sujet.
 
 ## Branches
 
-- `main` : copie de `upstream/main`, jamais modifiée directement.
-- Une branche par sujet, créée depuis `main`, proposée en PR à l'amont, puis fusionnée dans `ultracc` :
-  - `feat/base-path` (PR #160) : variable `BASE_PATH`, service dans un sous-dossier.
-  - `fix/rtorrent-xmlrpc` (PR #161) : pilote rTorrent (XML-RPC, sélection d'épisodes, torrents partiels, suppression des données, torrent terminé puis arrêté).
-  - `fix/plex-server-address` (PR #162) : l'assistant Plex teste les adresses du serveur.
-- `ultracc` : le build de l'utilisateur. Il fusionne les branches ci-dessus et ajoute ce qui ne part pas à l'amont :
-  - suppression des données du torrent quand on supprime ses épisodes (choix volontaire, pas proposé pour l'instant) ;
-  - le banc de test et les outils de déploiement (`deploy/`, `scripts/package-linux.mjs`, `scripts/update-fankarr.sh`) ;
-  - ce fichier.
-
-Une correction qui concerne l'amont va sur sa branche `fix/…` (et donc dans sa PR), jamais directement sur `ultracc`.
+- `ultracc` : la seule branche de travail. Les corrections et fonctionnalités y sont commitées directement, puis publiées en Release.
+- `main` : copie de l'amont, figée. On n'y touche pas.
+- Les branches `feat/base-path`, `fix/rtorrent-xmlrpc` et `fix/plex-server-address` (PR #160 à #162, restées sans réponse) ne servent plus : tout est déjà fusionné dans `ultracc`. Ne pas les pousser.
 
 ## Règles de travail
 
 - L'utilisateur écrit en français : réponses, commits, PR et commentaires de code en français.
-- Rien ne part à l'amont (push sur une branche de PR, nouvelle PR, commentaire) sans l'accord explicite de l'utilisateur.
+- Rien ne part chez l'amont (push, PR, commentaire) sans l'accord explicite de l'utilisateur ; le fork (`origin`) reçoit seulement `ultracc` et les tags.
 - Tout correctif est validé au banc avant d'être proposé. Pour un bug, ajouter d'abord le scénario qui le reproduit, le voir échouer, puis corriger.
 - Serveurs de test locaux : éviter le port 8080 (préférer 8095 et suivants).
 
