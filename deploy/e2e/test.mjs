@@ -312,6 +312,16 @@ await step('M. Sécurité : routes admin protégées quelle que soit la casse', 
     }
 })
 
+await step('N. Sécurité : CORS réservé à l\'API publique', async () => {
+    const origin = { Origin: 'https://ailleurs.example' }
+    const app = await fetch(FANKARR + '/api/auth/status', { headers: origin })
+    check('API de l\'interface : pas d\'en-tête CORS', !app.headers.get('access-control-allow-origin'), app.headers.get('access-control-allow-origin'))
+    const pub = await fetch(FANKARR + '/api/v1/auth/me', { headers: origin })
+    check('API publique : CORS ouvert', pub.headers.get('access-control-allow-origin') === '*', pub.headers.get('access-control-allow-origin'))
+    const pre = await fetch(FANKARR + '/api/v1/requests', { method: 'OPTIONS', headers: { ...origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' } })
+    check('API publique : pré-requête acceptée', pre.status === 204 && /authorization/i.test(pre.headers.get('access-control-allow-headers') ?? ''), `${pre.status} ${pre.headers.get('access-control-allow-headers')}`)
+})
+
 await step('Journal FanKarr', async () => {
     // Ignoré : l'avertissement du démarrage, avant que la médiathèque soit configurée
     // ni les épisodes volontairement non sélectionnés, ignorés par l'import

@@ -88,7 +88,8 @@ app.use(express.json())
 app.use(cookieParser())
 
 
-app.use(cors({
+// CORS pour l'API publique seulement : l'interface est servie depuis la même origine
+app.use('/api/v1', cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
