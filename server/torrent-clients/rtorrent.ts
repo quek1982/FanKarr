@@ -184,6 +184,20 @@ async function d_multicall(
     return Array.isArray(result) ? result : []
 }
 
+// Fichiers d'un torrent terminé : ils ne changent plus, inutile de les relire à chaque interrogation
+const COMPLETE_FILES_TTL = 60_000
+const completeFiles = new Map<string, { at: number; files: any[] }>()
+
+// Peu de requêtes à la fois : rTorrent les traite une par une et ruTorrent attend derrière
+const MAX_CONCURRENT_RPC = 2
+
+async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+    let next = 0
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) await fn(items[next++])
+    }))
+}
+
 async function rtTorrentExists(config: ClientConfig, hash: string): Promise<boolean> {
     try {
         const rows = await d_multicall(config, 'main', ['d.hash'])
@@ -235,6 +249,7 @@ async function rtApplyFilePriority(
             }
         }
         await rpcCall(config, 'd.update_priorities', [hash])
+        completeFiles.delete(hash.toLowerCase())
 
         logger.info('rtorrent', `Fichier n° ${fileIndex} sélectionné pour ${hash.slice(0, 8)}…`)
         return
@@ -315,14 +330,30 @@ const RT: TorrentClientDriver = {
 
         const rows = await d_multicall(config, 'main', methods)
 
+        // rTorrent traite le XML-RPC d'un seul fil : on lui demande le moins possible
         const fileMap = new Map<string, any[]>()
-        await Promise.all(rows.map(async (r: any) => {
-            const hash = String(r[0]).toUpperCase()
+        const now     = Date.now()
+        const alive   = new Set(rows.map((r: any) => String(r[0]).toLowerCase()))
+        for (const hash of completeFiles.keys()) if (!alive.has(hash)) completeFiles.delete(hash)
+
+        const toFetch: string[] = []
+        for (const r of rows) {
+            const hash   = String(r[0]).toLowerCase()
+            const cached = completeFiles.get(hash)
+            const done   = Number(r[5]) === 1 && Number(r[4]) === 0
+            if (done && cached && now - cached.at < COMPLETE_FILES_TTL) fileMap.set(hash, cached.files)
+            else toFetch.push(hash)
+            if (!done) completeFiles.delete(hash)
+        }
+        await mapLimit(toFetch, MAX_CONCURRENT_RPC, async hash => {
             try {
-                const files = await rpcCall(config, 'f.multicall', [hash, '', 'f.completed_chunks=', 'f.size_chunks=', 'f.path=', 'f.priority=', 'f.size_bytes='])
-                if (Array.isArray(files) && files.length > 0) fileMap.set(hash.toLowerCase(), files)
+                const files = await rpcCall(config, 'f.multicall', [hash.toUpperCase(), '', 'f.completed_chunks=', 'f.size_chunks=', 'f.path=', 'f.priority=', 'f.size_bytes='])
+                if (!Array.isArray(files) || files.length === 0) return
+                fileMap.set(hash, files)
+                const row = rows.find((r: any) => String(r[0]).toLowerCase() === hash)
+                if (row && Number(row[5]) === 1 && Number(row[4]) === 0) completeFiles.set(hash, { at: now, files })
             } catch {}
-        }))
+        })
 
         return rows
             .map(r => {
@@ -404,6 +435,7 @@ const RT: TorrentClientDriver = {
                 if (Number(files[i][0]) === 0) await rpcCall(config, 'f.priority.set', [`${hash}:f${i}`, 1])
             }
             await rpcCall(config, 'd.update_priorities', [hash])
+            completeFiles.delete(hash.toLowerCase())
             await rpcCall(config, 'd.start', [hash])
             logger.info('rtorrent', `Torrent ${hash.slice(0, 8)}… déjà présent : tous ses fichiers sont maintenant téléchargés`)
             return
@@ -443,6 +475,7 @@ const RT: TorrentClientDriver = {
 
     async remove(config, hash, deleteFiles = false) {
         const h = hash.toUpperCase()
+        completeFiles.delete(hash.toLowerCase())
         if (!deleteFiles) {
             await rpcCall(config, 'd.erase', [h])
             logger.info('rtorrent', `Torrent ${hash.slice(0, 8)}… supprimé`)
