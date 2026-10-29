@@ -19,6 +19,8 @@ export interface User {
     tourSeenAt? : string | null
     lastLoginAt?: string | null
     jellyfinId? : string | null
+    // Incrémenté à chaque changement de mot de passe : invalide les sessions déjà ouvertes
+    sessionVersion?: number
 }
 
 const USERS_PATH  = path.join(DATA_DIR, 'users.json')
@@ -146,7 +148,10 @@ export function updateUser(
         user.username = changes.username
     }
     if (changes.role     !== undefined) user.role        = changes.role
-    if (changes.password !== undefined) user.passwordHash = bcrypt.hashSync(changes.password, SALT_ROUNDS)
+    if (changes.password !== undefined) {
+        user.passwordHash   = bcrypt.hashSync(changes.password, SALT_ROUNDS)
+        user.sessionVersion = (user.sessionVersion ?? 0) + 1
+    }
 
     writeUsers(users)
     logger.info('users', `Utilisateur « ${user.username} » mis à jour`)
@@ -169,7 +174,8 @@ export function changePassword(id: string, currentPassword: string, newPassword:
     if (!bcrypt.compareSync(currentPassword, user.passwordHash)) {
         throw new Error('Mot de passe actuel incorrect')
     }
-    user.passwordHash = bcrypt.hashSync(newPassword, SALT_ROUNDS)
+    user.passwordHash   = bcrypt.hashSync(newPassword, SALT_ROUNDS)
+    user.sessionVersion = (user.sessionVersion ?? 0) + 1
     writeUsers(users)
     logger.info('users', `Mot de passe changé pour « ${user.username} »`)
 }
