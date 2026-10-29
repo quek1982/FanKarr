@@ -31,9 +31,11 @@ Une correction qui concerne l'amont va sur sa branche `fix/…` (et donc dans sa
 pnpm typecheck                                   # front + serveur
 node scripts/package-linux.mjs                   # → release/fankarr-linux-x64.tar.gz (testé par le banc)
 node deploy/e2e/gen/gen.mjs deploy/e2e/work      # une fois : données de test (non versionnées)
+# + certificat de la fausse API (gen.mjs ne le crée pas ; sans lui le conteneur fakeapi s'arrête et tout échoue) :
+MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -keyout deploy/e2e/work/cert/key.pem -out deploy/e2e/work/cert/cert.pem -days 365 -subj "/CN=metadata.fankai.fr" -addext "subjectAltName=DNS:metadata.fankai.fr"
 docker compose -f deploy/e2e/docker-compose.yml up -d --build
 node deploy/e2e/seed.mjs                         # après chaque recréation des conteneurs, sinon rien ne se télécharge
-node deploy/e2e/test.mjs                         # ~10 min, 46/46 attendu
+node deploy/e2e/test.mjs                         # ~10 min, 55/55 attendu
 ```
 
 Le banc (ports 8097-8100) lance un vrai rTorrent, un seeder, un tracker, un faux catalogue et une fausse API metadata.fankai.fr, avec FanKarr derrière nginx sous `/fankarr`. Après une reconstruction de l'archive : `docker compose … restart fankarr proxy`.

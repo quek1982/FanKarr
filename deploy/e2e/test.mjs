@@ -2,7 +2,7 @@
 //   node deploy/e2e/test.mjs
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
-import { DIR, RTORRENT, SEEDER, TORRENTS, api, rpc, rtList, rtFiles, sh, sleep, waitFor } from './lib.mjs'
+import { DIR, FANKARR, RTORRENT, SEEDER, TORRENTS, api, rpc, rtList, rtFiles, sh, sleep, waitFor } from './lib.mjs'
 import { setup } from './setup.mjs'
 
 const { T1, T2, T3 } = TORRENTS
@@ -243,6 +243,32 @@ await step('J. Mode « déplacer »', async () => {
     const r = await importNow(T3.infohash)
     check('fichier déplacé dans la médiathèque', exists(media(2, 2)) && links(media(2, 2)) === 1, JSON.stringify(r))
     check('source retirée du dossier de téléchargement', !exists(`${DL}/${T3.name}`))
+})
+
+await step('K. Sécurité : sessions invalidées au changement de mot de passe', async () => {
+    const call = async (cookie, method, url, body) => {
+        const res = await fetch(FANKARR + url, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: body === undefined ? undefined : JSON.stringify(body) })
+        return { status: res.status, headers: res.headers, cookie: (res.headers.get('set-cookie') ?? '').split(';')[0], data: await res.json().catch(() => null) }
+    }
+    const login = password => call('', 'POST', '/api/auth/login', { username: 'admin', password })
+    const a = await login('admin12345')
+    const b = await login('admin12345')
+    check('deux sessions ouvertes', a.status === 200 && b.status === 200 && a.cookie && b.cookie)
+    check('en-têtes de sécurité présents', a.headers.get('x-content-type-options') === 'nosniff' && a.headers.get('x-frame-options') === 'SAMEORIGIN')
+
+    const change = await call(b.cookie, 'POST', '/api/auth/change-password', { currentPassword: 'admin12345', newPassword: 'admin12345-bis' })
+    check('changement de mot de passe accepté', change.status === 200, JSON.stringify(change.data))
+    check('la session qui change le mot de passe reste ouverte', change.cookie && (await call(change.cookie, 'GET', '/api/auth/me')).status === 200)
+    check('l\'autre session est refusée', (await call(a.cookie, 'GET', '/api/auth/me')).status === 401)
+    check('l\'autre session n\'est plus connectée pour l\'interface', (await call(a.cookie, 'GET', '/api/auth/status')).data?.loggedIn === false)
+
+    const c = await login('admin12345-bis')
+    check('nouveau mot de passe accepté', c.status === 200)
+    const back = await call(c.cookie, 'POST', '/api/auth/change-password', { currentPassword: 'admin12345-bis', newPassword: 'admin12345' })
+    check('mot de passe remis', back.status === 200, JSON.stringify(back.data))
+    // La session partagée du banc a été invalidée avec les autres : on s'identifie de nouveau
+    const r = await api('POST', '/api/auth/login', { username: 'admin', password: 'admin12345' })
+    check('reconnexion du banc', r.status === 200, JSON.stringify(r.data))
 })
 
 await step('Journal FanKarr', async () => {
