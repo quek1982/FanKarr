@@ -58,6 +58,20 @@ registerDriver(rdtClientDriver)
 const app  = express()
 const PORT = Number(process.env.PORT) || 9898
 
+// Derrière un proxy local (nginx), req.ip et req.secure viennent des en-têtes X-Forwarded-*.
+// Seuls les proxys de confiance sont crus ; TRUST_PROXY permet d'en changer (ex. « 1 », « false »).
+const TRUST_PROXY = (process.env.TRUST_PROXY ?? 'loopback').trim()
+app.set('trust proxy', TRUST_PROXY === 'true' ? true : TRUST_PROXY === 'false' ? false : /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY)
+
+app.use((_req, res, next) => {
+    res.set({
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options'       : 'SAMEORIGIN',
+        'Referrer-Policy'       : 'same-origin',
+    })
+    next()
+})
+
 app.use(express.json())
 app.use(cookieParser())
 

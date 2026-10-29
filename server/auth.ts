@@ -29,16 +29,25 @@ const NO_EXPIRY  = RAW_EXPIRY === '0' || RAW_EXPIRY.toLowerCase() === 'never'
 const TOKEN_EXPIRY: string | undefined = NO_EXPIRY ? undefined : RAW_EXPIRY
 
 function signToken(user: User): string {
-    const payload = { id: user.id, username: user.username, role: user.role }
+    const payload = { id: user.id, username: user.username, role: user.role, v: user.sessionVersion ?? 0 }
     return NO_EXPIRY
         ? jwt.sign(payload, JWT_SECRET)
         : jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRY as any })
 }
 
+// Session valide : le jeton date d'après le dernier changement de mot de passe
+function sessionMatches(payload: any, user: User): boolean {
+    return (payload.v ?? 0) === (user.sessionVersion ?? 0)
+}
+
+function setSessionCookie(res: Response, user: User): void {
+    // secure dès que la requête arrive en HTTPS (y compris derrière un proxy de confiance)
+    res.cookie('fankarr_token', signToken(user), { httpOnly: true, sameSite: 'lax', secure: res.req.secure })
+}
+
 function setCookieAndRespond(res: Response, user: User): void {
     user.lastLoginAt = markLogin(user.id) ?? user.lastLoginAt
-    const token = signToken(user)
-    res.cookie('fankarr_token', token, { httpOnly: true, sameSite: 'lax' })
+    setSessionCookie(res, user)
     res.json({ success: true, user: safeUser(user) })
 }
 
@@ -60,7 +69,7 @@ export function authStatus(req: Request, res: Response): void {
     try {
         const payload = jwt.verify(token, JWT_SECRET) as any
         const user    = findById(payload.id)
-        if (!user) { res.json({ setup, loggedIn: false, jellyfinLogin }); return }
+        if (!user || !sessionMatches(payload, user)) { res.json({ setup, loggedIn: false, jellyfinLogin }); return }
         res.json({
             setup, loggedIn: true, jellyfinLogin, role: user.role, username: user.username, userId: user.id,
             onboardingDone: !!settings.onboardingCompletedAt,
@@ -205,6 +214,8 @@ export function authChangePassword(req: Request, res: Response): void {
     }
     try {
         changePassword(req.user!.id, currentPassword, newPassword)
+        // Les autres sessions sont invalidées ; celle-ci reste ouverte
+        setSessionCookie(res, findById(req.user!.id)!)
         res.json({ success: true })
     } catch (err) {
         res.status(400).json({ error: err instanceof Error ? err.message : 'Erreur inattendue, consultez les journaux' })
@@ -243,6 +254,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
         const user    = findById(payload.id)
         if (!user) {
             res.status(401).json({ error: 'Utilisateur introuvable' }); return
+        }
+        if (!sessionMatches(payload, user)) {
+            res.status(401).json({ error: 'Session expirée, reconnectez-vous' }); return
         }
         req.user = user
         next()
