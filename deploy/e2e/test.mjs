@@ -285,10 +285,38 @@ await step('L. Sous-dossier : icône servie sous /fankarr', async () => {
     check('icône servie', res.status === 200 && /image/.test(res.headers.get('content-type') ?? ''), `${res.status} ${res.headers.get('content-type')}`)
 })
 
+await step('M. Sécurité : routes admin protégées quelle que soit la casse', async () => {
+    const call = async (cookie, method, url, body) => {
+        const res = await fetch(FANKARR + url, { method, headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: body === undefined ? undefined : JSON.stringify(body) })
+        return { status: res.status, cookie: (res.headers.get('set-cookie') ?? '').split(';')[0], data: await res.json().catch(() => null) }
+    }
+    // Express ignore la casse des routes : /api/USERS mène à /api/users
+    for (const url of ['/api/USERS', '/api/Users', '/api/JELLYFIN/settings', '/api/SYSTEM/info']) {
+        const r = await call('', 'GET', url)
+        check(`sans session : GET ${url} refusé`, r.status === 401, `${r.status} ${JSON.stringify(r.data).slice(0, 120)}`)
+    }
+    const intrus = await call('', 'POST', '/api/USERS', { username: 'intrus', password: 'intrus12345', role: 'admin' })
+    check('sans session : création d\'un admin refusée', intrus.status === 401, `${intrus.status} ${JSON.stringify(intrus.data).slice(0, 120)}`)
+
+    const created = await api('POST', '/api/users', { username: 'simple', password: 'simple12345', role: 'user' })
+    check('compte simple créé', created.status === 200, JSON.stringify(created.data))
+    const user = await call('', 'POST', '/api/auth/login', { username: 'simple', password: 'simple12345' })
+    for (const url of ['/api/Torrent-clients', '/api/LOGS', '/api/Browse?path=/', '/api/Settings']) {
+        const r = await call(user.cookie, 'GET', url)
+        check(`compte simple : GET ${url.split('?')[0]} refusé`, r.status === 403, `${r.status} ${JSON.stringify(r.data).slice(0, 120)}`)
+    }
+
+    // Ménage : comptes du scénario (et intrus éventuel)
+    for (const u of (await api('GET', '/api/users')).data ?? []) {
+        if (u.username === 'simple' || u.username === 'intrus') await api('DELETE', `/api/users/${u.id}`)
+    }
+})
+
 await step('Journal FanKarr', async () => {
     // Ignoré : l'avertissement du démarrage, avant que la médiathèque soit configurée
     // ni les épisodes volontairement non sélectionnés, ignorés par l'import
-    const bad = (await fkLogs(/./, ['warn', 'error'])).filter(l => !/médiathèque introuvable : $|fichier non sélectionné/.test(l))
+    // ni les refus d'accès provoqués par le scénario M
+    const bad = (await fkLogs(/./, ['warn', 'error'])).filter(l => !/médiathèque introuvable : $|fichier non sélectionné|Accès admin refusé pour « simple »/.test(l))
     check('aucun avertissement ni erreur dans le journal', bad.length === 0, bad.slice(-8).join('\n        '))
 })
 

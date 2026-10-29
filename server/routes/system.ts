@@ -40,7 +40,7 @@ router.post('/logs/clear', requireAuth, (_req, res) => {
 })
 
 // ── Système ────────────────────────────────────────────────────
-router.get('/system/info', systemInfo)
+router.get('/system/info', requireAuth, systemInfo)
 
 router.get('/system', requireAuth, (_req, res) => {
     res.json({ isDocker: fs.existsSync('/.dockerenv') })

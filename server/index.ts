@@ -138,7 +138,9 @@ const ADMIN_PREFIXES = [
     '/logs', '/browse', '/browse-files', '/update', '/scan', '/debug',
 ]
 app.use('/api', (req, res, next) => {
-    if (ADMIN_PREFIXES.some(p => req.path === p || req.path.startsWith(p + '/'))) {
+    // Express ignore la casse des routes (/api/USERS mène à /api/users) : la garde aussi
+    const p0 = req.path.toLowerCase()
+    if (ADMIN_PREFIXES.some(p => p0 === p || p0.startsWith(p + '/'))) {
         return requireAdmin(req, res, next)
     }
     next()

@@ -1,4 +1,5 @@
 import { Router }       from 'express'
+import { requireAdmin } from '../auth.js'
 import { readSettings, writeSettings, type Settings } from '../settings.js'
 import { readUsers, importJellyfinUser } from '../users.js'
 import { testJellyfinConnection, fetchJellyfinUsers, getJellyfinServerId, normalizeJellyfinId, type JellyfinUser } from '../lib/jellyfin.js'
@@ -16,11 +17,11 @@ function settingsView(s: Settings) {
     }
 }
 
-router.get('/jellyfin/settings', (_req, res) => {
+router.get('/jellyfin/settings', requireAdmin, (_req, res) => {
     res.json(settingsView(readSettings()))
 })
 
-router.post('/jellyfin/settings', (req, res) => {
+router.post('/jellyfin/settings', requireAdmin, (req, res) => {
     const { jellyfinUrl, jellyfinAdminToken } = req.body ?? {}
     const current = readSettings()
     const update: Partial<Settings> = {}
@@ -36,7 +37,7 @@ router.post('/jellyfin/settings', (req, res) => {
     res.json(settingsView(writeSettings(update)))
 })
 
-router.post('/jellyfin/test', async (req, res) => {
+router.post('/jellyfin/test', requireAdmin, async (req, res) => {
     const settings = readSettings()
 
     const jellyfinUrl = req.body?.jellyfinUrl || settings.jellyfinUrl
@@ -84,7 +85,7 @@ export async function runJellyfinImport(): Promise<JellyfinImportResult> {
     return importJellyfinUsers(await fetchJellyfinUsers())
 }
 
-router.get('/jellyfin/users', async (_req, res) => {
+router.get('/jellyfin/users', requireAdmin, async (_req, res) => {
     try {
         const jellyfinUsers = await fetchJellyfinUsers()
         const users         = readUsers()
@@ -109,7 +110,7 @@ router.get('/jellyfin/users', async (_req, res) => {
     }
 })
 
-router.post('/jellyfin/import', async (req, res) => {
+router.post('/jellyfin/import', requireAdmin, async (req, res) => {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id: unknown) => normalizeJellyfinId(String(id))) : []
     if (ids.length === 0) {
         res.status(400).json({ error: 'Aucun utilisateur sélectionné' }); return
@@ -124,7 +125,7 @@ router.post('/jellyfin/import', async (req, res) => {
 })
 
 // Import de tous les comptes actifs (assistant d'installation)
-router.post('/jellyfin/sync', async (_req, res) => {
+router.post('/jellyfin/sync', requireAdmin, async (_req, res) => {
     try {
         res.json(await runJellyfinImport())
     } catch (err) {

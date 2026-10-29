@@ -27,7 +27,7 @@ node deploy/e2e/gen/gen.mjs deploy/e2e/work      # une fois : données de test (
 MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -keyout deploy/e2e/work/cert/key.pem -out deploy/e2e/work/cert/cert.pem -days 365 -subj "/CN=metadata.fankai.fr" -addext "subjectAltName=DNS:metadata.fankai.fr"
 docker compose -f deploy/e2e/docker-compose.yml up -d --build
 node deploy/e2e/seed.mjs                         # après chaque recréation des conteneurs, sinon rien ne se télécharge
-node deploy/e2e/test.mjs                         # ~10 min, 58/58 attendu
+node deploy/e2e/test.mjs                         # ~10 min, 68/68 attendu
 ```
 
 Le banc (ports 8097-8100) lance un vrai rTorrent, un seeder, un tracker, un faux catalogue et une fausse API metadata.fankai.fr, avec FanKarr derrière nginx sous `/fankarr`. Après une reconstruction de l'archive : `docker compose … restart fankarr proxy`.
