@@ -271,6 +271,20 @@ await step('K. Sécurité : sessions invalidées au changement de mot de passe',
     check('reconnexion du banc', r.status === 200, JSON.stringify(r.data))
 })
 
+await step('L. Sous-dossier : icône servie sous /fankarr', async () => {
+    const html = await (await fetch(FANKARR + '/')).text()
+    const base = html.match(/<base href="([^"]*)"/i)?.[1]
+    const href = html.match(/<link[^>]*rel="icon"[^>]*href="([^"]*)"|<link[^>]*href="([^"]*)"[^>]*rel="icon"/i)
+    const icon = href && (href[1] ?? href[2])
+    check('la page déclare une icône', !!icon, html.match(/<head>[\s\S]*?<\/head>/i)?.[0])
+    if (!icon) return
+    // Le navigateur résout l'URL de l'icône par rapport au <base href>
+    const url = new URL(icon, new URL(base ?? '/', FANKARR))
+    check('URL de l\'icône dans /fankarr', url.pathname.startsWith('/fankarr/'), url.pathname)
+    const res = await fetch(url)
+    check('icône servie', res.status === 200 && /image/.test(res.headers.get('content-type') ?? ''), `${res.status} ${res.headers.get('content-type')}`)
+})
+
 await step('Journal FanKarr', async () => {
     // Ignoré : l'avertissement du démarrage, avant que la médiathèque soit configurée
     // ni les épisodes volontairement non sélectionnés, ignorés par l'import
