@@ -17,9 +17,22 @@ import { recentImportsBySerie } from '../lib/notifs.js'
 
 const router = Router()
 
-router.get('/library/recent', requireAuth, (req, res) => {
+router.get('/library/recent', requireAuth, async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 50)
-    res.json(recentImportsBySerie().slice(0, limit))
+    try {
+        // Une série supprimée depuis son import (plus aucun fichier) ne compte plus parmi les derniers imports
+        let organized: Record<string, Record<string, any>> = {}
+        try { const p = path.join(DATA_DIR, 'organized.json'); if (fs.existsSync(p)) organized = JSON.parse(fs.readFileSync(p, 'utf-8')) } catch {}
+        const organizedEpisodeIds = new Set(Object.values(organized).flatMap(eps => Object.keys(eps)))
+        const recent = await Promise.all(recentImportsBySerie().map(async r => ({ r, serieData: await readSerieData(r.serieId) })))
+        res.json(recent
+            .filter(({ serieData }) => (serieData?.seasons ?? []).some((s: any) => (s.episodes ?? []).some((ep: any) => organizedEpisodeIds.has(String(ep.id)))))
+            .map(({ r }) => r)
+            .slice(0, limit))
+    } catch (err) {
+        logger.error('api', `Échec du chargement des derniers imports : ${err instanceof Error ? err.message : err}`)
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Erreur inattendue, consultez les journaux' })
+    }
 })
 
 router.get('/series', requireAuth, async (_req, res) => {
@@ -46,7 +59,7 @@ router.get('/series', requireAuth, async (_req, res) => {
             return {
                 ...serie, torrent_count: torrents.length, has_torrents: torrents.length > 0,
                 download_state: computeSerieDownloadState(serieData, organized, activeTorrents, counts),
-                episode_count: counts.total, organized_count: counts.organized, last_imported_at: lastImports.get(serie.id) ?? null,
+                episode_count: counts.total, organized_count: counts.organized, last_imported_at: hasFiles ? lastImports.get(serie.id) ?? null : null,
                 in_client: inClient, has_files: hasFiles, rss_synced: !!synced[serie.id],
             }
         })})

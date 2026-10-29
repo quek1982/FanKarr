@@ -64,6 +64,13 @@ async function organizedIds() {
     const s = await serie()
     return new Set(s.seasons.flatMap(x => x.episodes).filter(e => e.organized).map(e => e.id))
 }
+// Accueil : derniers imports et date du dernier import de la série de test
+async function inRecent() {
+    return ((await api('GET', '/api/library/recent')).data ?? []).some(x => x.serieId === 9001)
+}
+async function lastImport() {
+    return ((await api('GET', '/api/series')).data?.series ?? []).find(s => s.id === 9001)?.last_imported_at ?? null
+}
 async function fkLogs(pattern, levels = null) {
     const r = await api('GET', '/api/logs?limit=1000')
     const lines = Array.isArray(r.data) ? r.data : (r.data?.logs ?? r.data?.entries ?? [])
@@ -166,6 +173,8 @@ await step('D. Intégrale avec sous-dossiers de saison', async () => {
     const r = await importNow(T2.infohash)
     check('import : S02E01 trouvé dans « Test Henshu/Saison 2/ »', exists(media(2, 1)), JSON.stringify(r))
     check('aucune erreur d\'import', (r.errors ?? []).length === 0, JSON.stringify(r.errors))
+    check('série dans les derniers imports (accueil)', await inRecent())
+    check('date de dernier import renseignée', (await lastImport()) !== null)
 })
 
 await step('E. Supprimer des épisodes (fichier + torrent devenu inutile)', async () => {
@@ -191,6 +200,11 @@ await step('F. Supprimer une saison (S02)', async () => {
     check('torrent mono-fichier retiré de rTorrent', !(await inRt(T3.infohash)))
     check('fichier du torrent mono-fichier supprimé', !exists(`${DL}/${T3.name}`))
     check('dossier de téléchargement conservé', exists(DL))
+    // Plus aucun épisode : la série ne doit plus apparaître comme dernier import ni « NOUVEAU »
+    check('plus aucun épisode importé', (await organizedIds()).size === 0, [...await organizedIds()].join(','))
+    check('série retirée des derniers imports (accueil)', !(await inRecent()))
+    const last = await lastImport()
+    check('plus de date de dernier import (pas de « NOUVEAU »)', last === null, String(last))
 })
 
 await step('G. Supprimer la série', async () => {
